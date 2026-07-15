@@ -1,0 +1,199 @@
+#include "ws2812.h"
+#include <Arduino.h>
+#include <string.h>
+uint32_t PixelStrip::Color(uint8_t red, uint8_t green, uint8_t blue, uint8_t white = 0) {
+	return ((uint32_t)white << 24) | ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
+}
+
+PixelStrip::PixelStrip(uint16_t numPixels, uint8_t brightness = 255) : _num(numPixels), _brightness(brightness) {
+	Wire.begin();
+	ws.bright = brightness;
+
+	if(numPixels == 64) {
+		this->RGB_Type = RGB_Board;
+	}else if(numPixels == 6) {
+		this->RGB_Type = RGB_Line;
+	}
+}
+
+void PixelStrip::begin() {
+	ws.func = SETBRIGHTNESS;
+	trans(0x00);
+}
+
+void PixelStrip::trans(uint8_t cmd) {
+	if(this->RGB_Type == RGB_Board) {
+		Wire.beginTransmission(Address);
+		Wire.write(0x40);
+		/* 为了配合树莓派的python驱动库，这里会发送一个字节的数据，该数据在这里必须得发，但是没有任何意义（在树莓派当中这个数据表示接下来会有多少字节数据会发送），不发送的话2040在接收数据时会出现数据错乱导致RGB不显示 */
+		Wire.write(13);
+		Wire.write(ws.func);
+		Wire.write(ws.pos);
+		Wire.write(ws.r);
+		Wire.write(ws.g);
+		Wire.write(ws.b);
+		Wire.write(ws.w);
+		Wire.write(ws.c);
+		Wire.write(ws.bright);
+		Wire.write(ws.first);
+		Wire.write(ws.count);
+		Wire.write(ws.data);
+		Wire.write(ws.data1);
+		Wire.endTransmission();
+	//	delay(5);
+		ws.clean();
+	} else if (this->RGB_Type == RGB_Line) {
+		Wire.beginTransmission(Address);
+		Wire.write(0x06);
+		/* 为了配合树莓派的python驱动库，这里会发送一个字节的数据，该数据在这里必须得发，但是没有任何意义（在树莓派当中这个数据表示接下来会有多少字节数据会发送），不发送的话2040在接收数据时会出现数据错乱导致RGB不显示 */
+		Wire.write(13);
+		Wire.write(ws.func);
+		Wire.write(ws.pos);
+		Wire.write(ws.r);
+		Wire.write(ws.g);
+		Wire.write(ws.b);
+		Wire.write(ws.w);
+		Wire.write(ws.c);
+		Wire.write(ws.bright);
+		Wire.write(ws.first);
+		Wire.write(ws.count);
+		Wire.write(ws.data);
+		Wire.write(ws.data1);
+		Wire.endTransmission();
+	//	delay(5);
+		ws.clean();
+	}
+}
+
+void PixelStrip::trans32(uint8_t cmd, uint8_t (&list)[32]) {
+	Wire.beginTransmission(Address);
+  Wire.write(ws.func);
+//	Wire.write(cmd);
+//	Wire.write(32);
+	for(int i = 0; i < 32; i++) {
+		Wire.write(list[i]);
+	}
+	Wire.endTransmission();
+  ws.clean();
+}
+
+void PixelStrip::clear() {
+	ws.func = CLEAR;
+	trans(0x00);
+}
+
+void PixelStrip::show() {
+	ws.func = SHOW;
+	trans(0x00);
+}
+
+void PixelStrip::setPixelColor(uint16_t n, uint32_t color) {
+	ws.pos = n;
+	ws.r = (color >> 16) & 0xFF;
+	ws.g = (color >> 8) & 0xFF;
+	ws.b = color & 0xFF;
+	ws.func = SETPIXELCOLOR;
+	trans(0x00);
+}
+
+void PixelStrip::setPixelColorRGB(uint16_t n, uint8_t red, uint8_t green, uint8_t blue, uint8_t white = 0) {
+	ws.pos = n;
+	ws.r = red;
+	ws.g = green;
+	ws.b = blue;
+	ws.w = white;
+	ws.func = SETPIXELCOLOR;
+	trans(0x00);
+}
+
+void PixelStrip::fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0, uint16_t first = 0, uint16_t end = 64) {
+	ws.r = r;
+	ws.g = g;
+	ws.b = b;
+	ws.w = w;
+	ws.first = first;
+	ws.count = end - first;
+	ws.func = FILL;
+	trans(0x00);
+}
+
+void PixelStrip::fillColor(uint32_t color, uint16_t first = 0, uint16_t end = 64) {
+	uint8_t r = (color >> 16) & 0xFF;
+	uint8_t g = (color >> 8) & 0xFF;
+	uint8_t b = color & 0xFF;
+	uint8_t w = (color >> 24) & 0xFF;
+	fill(r, g, b, w, first, end);
+}
+
+void PixelStrip::setBrightness(uint8_t brightness) {
+	ws.bright = brightness;
+	ws.func = SETBRIGHTNESS;
+	trans(0x00);
+}
+
+void PixelStrip::WRGB(uint32_t color, uint8_t& w, uint8_t& r, uint8_t& g, uint8_t& b) {
+  w = (color >> 24) & 0xFF;
+  r = (color >> 16) & 0xFF;
+  g = (color >> 8 ) & 0xFF;
+  b = (color >> 0 ) & 0xFF;
+}
+
+void PixelStrip::sendPos2Show(uint8_t pos, uint8_t r, uint8_t g, uint8_t b) {
+	ws.r = r;
+	ws.g = g;
+	ws.b = b;
+	for(int i = 0; i < pos; i++) {
+		if(i >= 0 && i <= 7)				ws.pos		|= 1<<i;
+		else if(i >= 8 && i <= 15)	ws.w			|= 1<<(i-8);
+		else if(i >= 16 && i <= 23)	ws.c			|= 1<<(i-16);
+		else if(i >= 24 && i <= 31) ws.bright |= 1<<(i-24);
+		else if(i >= 32 && i <= 39)	ws.first 	|= 1<<(i-32);
+		else if(i >= 40 && i <= 47) ws.count 	|= 1<<(i-40);
+		else if(i >= 48 && i <= 55)	ws.data		|= 1<<(i-48);
+		else if(i >= 56 && i <= 63)	ws.data1 	|= 1<<(i-56);
+	}
+	ws.func = SENDDATA2SHOW;
+	trans(0x00);
+}
+
+void PixelStrip::sendColor2Show(uint8_t pos, uint32_t color) {
+	uint8_t r, g, b, w;
+	this->WRGB(color, w, r, g, b);
+	this->sendPos2Show(pos, r, g, b);
+}
+
+void PixelStrip::sendAllPixRGB(uint8_t (&list)[64*3]) {
+	uint8_t tmp[32];
+  byte f = SENDALLPIXRGB0;
+  
+//	for(int i = 0; i < 6; i++, f++) {
+//		memcpy(tmp, list[i*32], 32);
+//    ws.func = f;
+////    LOG_INFO(f);
+//		trans32(0x00, tmp);
+//	}
+
+  memcpy(tmp, list[0], 32);
+  ws.func = SENDALLPIXRGB0;
+  trans32(0x00, tmp);
+  memcpy(tmp, list[32], 32);
+  ws.func = SENDALLPIXRGB1;
+  trans32(0x00, tmp);
+  memcpy(tmp, list[64], 32);
+  ws.func = SENDALLPIXRGB2;
+  trans32(0x00, tmp);
+  memcpy(tmp, list[96], 32);
+  ws.func = SENDALLPIXRGB3;
+  trans32(0x00, tmp);
+  memcpy(tmp, list[128], 32);
+  ws.func = SENDALLPIXRGB4;
+  trans32(0x00, tmp);
+  memcpy(tmp, list[160], 32);
+  ws.func = SENDALLPIXRGB5;
+  trans32(0x00, tmp);
+}
+
+
+uint16_t PixelStrip::numPixels() {
+	return _num;
+}
